@@ -1,0 +1,196 @@
+:root {
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; /* 英字フォントはヘルベチカ */
+  line-height: 1.6;
+  font-weight: 400;
+
+  color-scheme: dark;
+  color: #ffffff;
+  background-color: #0c0c0e;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+  width: 100vw;
+  height: 100vh;
+}
+
+/* コントロールパネル: 上部に横長配置、仕切り線はなし */
+#info-panel {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 64px;
+  background: transparent; /* 背景色は塗らない */
+  backdrop-filter: none; /* ぼかしも無くして完全に背後をそのまま見せる */
+  -webkit-backdrop-filter: none;
+  padding: 0 32px;
+  border-radius: 0; /* 丸みはなし */
+  box-shadow: none; /* シャドウも排除してフラットに */
+  border: none;
+  border-bottom: 0.5px solid rgba(255, 255, 255, 0.2); /* 下端のみ0.5pxの白枠 */
+  z-index: 10;
+  box-sizing: border-box;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: row; /* 横並び */
+  align-items: center;
+  justify-content: flex-start;
+  gap: 36px; /* 横の間隔 */
+}
+
+/* 仕切らない横並びレイアウト */
+#info-panel > div {
+  display: flex;
+  flex-direction: row; /* 子要素も横並びに */
+  align-items: center;
+  gap: 12px;
+  border-bottom: none;
+  padding-bottom: 0;
+}
+#info-panel > div:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+/* ヘッダー: timsector, ホワイトのサンセリフフォント */
+#info-panel h3 {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.8px;
+  color: #ffffff;
+  text-transform: lowercase; /* 小文字化でさらにミニマルに */
+  line-height: 1.2;
+}
+
+/* 各セクションの説明文 */
+.section-desc {
+  font-size: 11px;
+  line-height: 1.6;
+  margin: 0;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* セクションの見出し */
+.section-title {
+  display: inline-block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  color: rgba(255, 255, 255, 0.4);
+  font-weight: 700;
+  margin-bottom: 0;
+  margin-right: 4px;
+  white-space: nowrap;
+}
+
+.btn-group {
+  display: flex;
+  gap: 8px;
+}
+
+/* ボタン: 背景色の塗りなし、枠線なし、丸みなし */
+button {
+  flex: 1;
+  padding: 10px 16px;
+  border: none;
+  background-color: transparent; /* 背景色は塗らない */
+  background: none;
+  color: rgba(255, 255, 255, 0.4); /* 通常時は文字を少し薄くして存在感を抑える */
+  border-radius: 0; /* 丸みはなし */
+  cursor: pointer;
+  font-weight: 400; /* 通常時は標準ウェイト */
+  font-size: 12px;
+  transition: color 0.15s ease, font-weight 0.15s ease;
+  outline: none;
+}
+
+button:hover {
+  background-color: transparent; /* ホバー時も色は塗らない */
+  color: rgba(255, 255, 255, 0.85); /* ホバー時は文字を少し明るく */
+}
+
+/* アクティブなボタン: 枠線なし・背景色なし、テキストの太字(bold)で明示 */
+button.active {
+  background-color: transparent; /* アクティブ時も色は塗らない */
+  color: #ffffff; /* アクティブ時は白 */
+  font-weight: 800; /* 選択中は太字(bold)で明示 */
+  border: none;
+}
+
+button:disabled {
+  opacity: 0.25;
+  cursor: not-allowed;
+  background-color: transparent;
+  color: rgba(255, 255, 255, 0.2);
+}
+
+/* フッターのテキスト情報 */
+#coordinates {
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: 11px;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.85); /* 小さく、見やすい白テキスト */
+  white-space: pre-wrap;
+  margin: 0;
+  padding: 0;
+  background: none;
+  border: none;
+}
+
+.footer-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* 2画面分割レイアウト */
+#canvas-container {
+  width: 50vw;
+  height: calc(100vh - 64px);
+  position: absolute;
+  top: 64px;
+  left: 0;
+  z-index: 1;
+  border-right: 0.5px solid rgba(255, 255, 255, 0.2); /* 0.5pxの白線 */
+}
+
+#preview-container {
+  width: 50vw;
+  height: calc(100vh - 64px);
+  position: absolute;
+  top: 64px;
+  left: 50vw;
+  z-index: 1;
+  background-color: #08080a;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+
+#preview-canvas {
+  width: 90%;
+  height: 75%;
+  object-fit: contain;
+  border: 0.5px solid rgba(255, 255, 255, 0.2); /* 0.5pxの白線 */
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.7);
+  border-radius: 0; /* 丸みはなし */
+  image-rendering: auto;
+}
+
+.preview-title {
+  margin-bottom: 24px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.4);
+  letter-spacing: 1.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
