@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import * as THREE from 'three';
+import { Hand, Pen, Play, Pause, ArrowLeftRight, ArrowUpDown, Clock, FolderOpen } from 'lucide-react';
 import ThreeVolume from './components/ThreeVolume';
 
 // カーテンメッシュ（時間・空間スライス面）の型定義
@@ -21,12 +22,15 @@ interface TexturesState {
 export default function App() {
   // --- モード管理ステート ---
   const [toolMode, setToolMode] = useState<'rotate' | 'draw'>('rotate');
-  const [lastCoordsText, setLastCoordsText] = useState<string>("座標はまだ取得されていません");
+
 
   // --- 動画関連ステート ---
   const [videoSrc, setVideoSrc] = useState<string>('flower_02.mp4'); // 初期設定動画
   const [isScanning, setIsScanning] = useState<boolean>(false);
   const [scanProgressText, setScanProgressText] = useState<string>("");
+  const [scanProgressPercent, setScanProgressPercent] = useState<number>(0);
+  const [isModalOpen, setIsModalOpen] = useState<boolean>(true);
+  const [scanCompleted, setScanCompleted] = useState<boolean>(false);
 
   const [videoWidth, setVideoWidth] = useState<number>(1920);
   const [videoHeight, setVideoHeight] = useState<number>(1080);
@@ -146,7 +150,7 @@ export default function App() {
     if (N < 2 || canvases.length === 0) {
       canvas.width = 400;
       canvas.height = 300;
-      ctx.fillStyle = '#060608';
+      ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       return;
     }
@@ -480,6 +484,8 @@ export default function App() {
     isScanningRef.current = true;
     currentScanFrameRef.current = 0;
     setScanProgressText("scan start: 0%");
+    setScanProgressPercent(0);
+    setScanCompleted(false);
 
     // キャッシュクリア
     scanFrameCanvasesRef.current.forEach(c => {
@@ -514,6 +520,7 @@ export default function App() {
 
     const percent = Math.round((currentFrame / sf) * 100);
     setScanProgressText(`scanning: ${percent}% (${currentFrame}/${sf})`);
+    setScanProgressPercent(percent);
 
     // タイムスライス用にビデオフレームを縮小してメモリにキャッシュ (960x540)
     const cacheCanvas = document.createElement('canvas');
@@ -574,7 +581,7 @@ export default function App() {
       if (tex) tex.needsUpdate = true;
     });
 
-    setLastCoordsText(`スキャン完了！\n動画サイズ: ${videoWidth}x${videoHeight}\nフレーム数: ${totalFrames}\n(静的3D時空間ボリューム化完了)`);
+    setScanCompleted(true);
     
     // プレビューの初期黒描画
     drawPreviewCanvas(0);
@@ -595,7 +602,8 @@ export default function App() {
 
       const fileURL = URL.createObjectURL(file);
       setVideoSrc(fileURL);
-      setLastCoordsText("動画を読み込みました。スキャンを開始します...");
+      setIsModalOpen(true);
+      setScanCompleted(false);
     }
   };
 
@@ -639,10 +647,8 @@ export default function App() {
   };
 
   // --- ドローイング中座標の逆変換・表示処理 ---
-  const handlePointSampled = (point: THREE.Vector3, status: 'START' | 'DRAW') => {
-    const pixelCoords = getPixelCoordsLocal(point);
-
-    setLastCoordsText(`${status}:\n[X] ${pixelCoords.x} px (横幅)\n[Y] ${pixelCoords.y} px (縦幅)\n[Frame] ${pixelCoords.frame} / ${totalFrames} (フレーム数)`);
+  const handlePointSampled = (_point: THREE.Vector3, _status: 'START' | 'DRAW') => {
+    // 座標表示機能廃止のため空処理
   };
 
   // ドローイング開始時の完全初期化リセットハンドラ (マウスダウン)
@@ -669,6 +675,12 @@ export default function App() {
         { value: 'Z', label: 'Z軸方向 (時間軸にスライド)' }
       ];
     }
+  };
+
+  const getSweepAxisIcon = (axis: 'X' | 'Y' | 'Z') => {
+    if (axis === 'X') return <ArrowLeftRight size={30} />;
+    if (axis === 'Y') return <ArrowUpDown size={30} />;
+    return <Clock size={30} />;
   };
 
   // 軌跡の点を最大値（600点）に等間隔リサンプリングして制限するヘルパー関数
@@ -824,75 +836,13 @@ export default function App() {
       {/* 上部横長配置のコントロールパネル (仕切り線なしのフラットヘッダー) */}
       <div id="info-panel">
         <div>
-          <h3>timsector</h3>
+          <h3>timesector</h3>
         </div>
+      </div>
 
-        <div>
-          <span className="section-title">mode</span>
-          <div className="btn-group">
-            <button 
-              className={toolMode === 'rotate' ? 'active' : ''} 
-              onClick={() => setToolMode('rotate')}
-            >
-              rotate
-            </button>
-            <button 
-              className={toolMode === 'draw' ? 'active' : ''} 
-              onClick={() => setToolMode('draw')}
-            >
-              draw
-            </button>
-          </div>
-        </div>
-
-        {/* 2D プレビューアニメーションのコントロール */}
-        <div>
-          <span className="section-title">play</span>
-          <div className="btn-group">
-            <button 
-              className={isPlaying2D ? 'active' : ''} 
-              onClick={() => setIsPlaying2D(!isPlaying2D)}
-              disabled={lastLinePointsRef.current.length === 0}
-            >
-              {isPlaying2D ? 'pause' : 'play'}
-            </button>
-          </div>
-        </div>
-
-        {/* スイープ軸のユーザー選択 */}
-        {lastLinePointsRef.current.length >= 2 && (
-          <div>
-            <span className="section-title">shaft</span>
-            <div className="btn-group">
-              {getAvailableSweepAxes(lastExtrudeDirectionRef.current).map(opt => (
-                <button
-                  key={opt.value}
-                  className={sweepAxis === opt.value ? 'active' : ''}
-                  onClick={() => {
-                    const newAxis = opt.value as 'X' | 'Y' | 'Z';
-                    setSweepAxis(newAxis);
-                    setOffsetVal(0);
-                    offsetDirectionRef.current = 1;
-
-                    // 新しいスイープ軸に合わせて軌跡全体の最小・最大限界座標を再計算する (当たり判定バグ防止)
-                    if (lastLinePointsRef.current.length > 0) {
-                      const limited = limitPoints(lastLinePointsRef.current);
-                      linePointsMinMaxRef.current = calcMinMax(limited, newAxis);
-                    }
-
-                    drawPreviewCanvas(0);
-                  }}
-                >
-                  {opt.value.toLowerCase()}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* 動画ファイルインポート */}
-        <div>
-          <span className="section-title">movie</span>
+      {/* 左側フローティングサイドバー */}
+      <div id="sidebar">
+        <div className="control-grid">
           <input 
             type="file" 
             ref={videoInputRef}
@@ -900,33 +850,73 @@ export default function App() {
             accept="video/*" 
             style={{ display: 'none' }} 
           />
-          <button onClick={handleImportClick} disabled={isScanning}>
-            select file
+          <button 
+            onClick={handleImportClick} 
+            disabled={isScanning}
+            data-tooltip="Open File / Import"
+          >
+            <FolderOpen size={30} />
           </button>
-          {isScanning && (
-            <div id="scan-progress" style={{ marginLeft: '8px', fontSize: '11px', color: '#ffffff', fontFamily: 'monospace' }}>
-              {scanProgressText}
-            </div>
-          )}
+          <button 
+            className={toolMode === 'rotate' ? 'active' : ''} 
+            onClick={() => setToolMode('rotate')}
+            data-tooltip="Pan / Select"
+          >
+            <Hand size={30} />
+          </button>
+          <button 
+            className={toolMode === 'draw' ? 'active' : ''} 
+            onClick={() => setToolMode('draw')}
+            data-tooltip="Slice / Draw / Edit"
+          >
+            <Pen size={30} />
+          </button>
+          <button 
+            className={isPlaying2D ? 'active' : ''} 
+            onClick={() => setIsPlaying2D(!isPlaying2D)}
+            disabled={lastLinePointsRef.current.length === 0}
+            data-tooltip={isPlaying2D ? 'Pause' : 'Play'}
+          >
+            {isPlaying2D ? <Pause size={30} /> : <Play size={30} />}
+          </button>
+          {lastLinePointsRef.current.length >= 2 && 
+            getAvailableSweepAxes(lastExtrudeDirectionRef.current).map(opt => (
+              <button
+                key={opt.value}
+                className={sweepAxis === opt.value ? 'active' : ''}
+                data-tooltip={opt.label}
+                onClick={() => {
+                  const newAxis = opt.value as 'X' | 'Y' | 'Z';
+                  setSweepAxis(newAxis);
+                  setOffsetVal(0);
+                  offsetDirectionRef.current = 1;
+
+                  // 新しいスイープ軸に合わせて軌跡全体の最小・最大限界座標を再計算する (当たり判定バグ防止)
+                  if (lastLinePointsRef.current.length > 0) {
+                    const limited = limitPoints(lastLinePointsRef.current);
+                    linePointsMinMaxRef.current = calcMinMax(limited, newAxis);
+                  }
+
+                  drawPreviewCanvas(0);
+                }}
+              >
+                {getSweepAxisIcon(opt.value as 'X' | 'Y' | 'Z')}
+              </button>
+            ))
+          }
         </div>
+
+        {isScanning && (
+          <div className="scan-progress-wrapper">
+            <div className="scan-progress-text">{scanProgressText}</div>
+            <div className="scan-progress-container">
+              <div className="scan-progress-bar" style={{ width: `${scanProgressPercent}%` }}></div>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* 最後に取得した解析座標 (画面左下の隅にミニマルに浮かせた配置) */}
-      <div style={{
-        position: 'absolute',
-        bottom: '24px',
-        left: '24px',
-        zIndex: 10,
-        pointerEvents: 'none',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '6px'
-      }}>
-        <span className="section-title" style={{ color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: '1.2px', fontSize: '10px' }}>
-          coordinates (x, y, f)
-        </span>
-        <div id="coordinates">{lastCoordsText}</div>
-      </div>
+
 
       {/* [左半分] R3F 3D ビューアコンポーネント */}
       <ThreeVolume
@@ -948,9 +938,6 @@ export default function App() {
 
       {/* [右半分] 生成された 2D スリットスキャン動画ビューア */}
       <div id="preview-container">
-        <div className="preview-title">
-          {isScanning ? 'scanning...' : 'preview'}
-        </div>
         <canvas id="preview-canvas" ref={previewCanvasRef} />
       </div>
 
@@ -967,6 +954,42 @@ export default function App() {
         onLoadedMetadata={handleLoadedMetadata}
         onSeeked={handleSeeked}
       />
+
+      {/* モーダルウィンドウ */}
+      {isModalOpen && (
+        <div className="modal-overlay">
+          <div className="modal-content">
+            <h2>input video preview</h2>
+            
+            <div className="modal-video-wrapper">
+              <video
+                src={videoSrc}
+                autoPlay
+                loop
+                muted
+                playsInline
+                className="modal-preview-video"
+              />
+            </div>
+
+            <div className="scan-progress-wrapper" style={{ width: '100%' }}>
+              <div className="scan-progress-text">{scanProgressText}</div>
+              <div className="scan-progress-container">
+                <div className="scan-progress-bar" style={{ width: `${scanProgressPercent}%` }}></div>
+              </div>
+            </div>
+
+            {scanCompleted && (
+              <button 
+                className="btn-slit-scan-go"
+                onClick={() => setIsModalOpen(false)}
+              >
+                slit-scanへ
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
