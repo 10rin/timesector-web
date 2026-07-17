@@ -975,7 +975,7 @@ export default function App() {
         <div className="view-divider" />
 
         {/* volumeビューのフローティングヘッダーセクション */}
-        <div className="view-header" style={isPopoutOpen ? { width: 'calc(100vw - 48px)', left: '24px' } : { width: 'calc(50vw - 48px)', left: '24px' }}>
+        <div className="view-header" style={isPopoutOpen ? { width: 'calc(100vw - 80px)', left: '40px' } : { width: 'calc(50vw - 80px)', left: '40px' }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
             <div className="view-title">volume</div>
             {isScanning && (
