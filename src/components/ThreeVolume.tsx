@@ -1,6 +1,6 @@
 import { useRef, useState, useEffect } from 'react';
-import { Canvas } from '@react-three/fiber';
-import { OrbitControls } from '@react-three/drei';
+import { Canvas, useThree } from '@react-three/fiber';
+import { OrbitControls, Line } from '@react-three/drei';
 import * as THREE from 'three';
 
 // Propsの定義
@@ -29,6 +29,7 @@ interface ThreeVolumeProps {
   onDrawProgress: (points: THREE.Vector3[], direction: 'X' | 'Y' | 'Z') => void; // ドラッグ中リアルタイム同期
   onDrawStart: () => void;
   onPointSampled: (point: THREE.Vector3, status: 'START' | 'DRAW') => void;
+  isPopoutOpen: boolean;    // ★追加: ポップアウトが開いているかどうかの監視
 }
 
 // 3Dボリューム本体（直方体）とドローイング入力を制御するインナーステージ
@@ -177,19 +178,6 @@ function SpacetimeVolumeStage({
 
   const materials = getMaterials();
 
-  // ガイド線オブジェクトの生成
-  const getGuideLine = () => {
-    const geom = new THREE.BufferGeometry().setFromPoints(linePoints);
-    const mat = new THREE.LineBasicMaterial({ 
-      color: 0xff0000, 
-      linewidth: 4, 
-      depthTest: false, 
-      depthWrite: false 
-    });
-    const line = new THREE.Line(geom, mat);
-    line.renderOrder = 999;
-    return line;
-  };
 
   // ★再生オフセットとスイープ軸に同期したカーテンメッシュの平行移動オフセットを計算する
   // 3D空間上で断面メッシュがボリュームからはみ出ないよう、ジオメトリのバウンディングボックスの端を基準にオフセット量を厳密にクランプ制限する
@@ -251,9 +239,16 @@ function SpacetimeVolumeStage({
         <lineBasicMaterial color={0x4facfe} linewidth={2} transparent opacity={0.5} />
       </lineSegments>
 
-      {/* ドラッグ中の赤い軌跡ガイド線 */}
+      {/* ドラッグ中の赤い軌跡ガイド線 (@react-three/drei の Line を使ってドライバ制限を回避し、太い線を確実に描画) */}
       {linePoints.length >= 2 && (
-        <primitive object={getGuideLine()} />
+        <Line
+          points={linePoints}
+          color={0xff0000}
+          lineWidth={2} // ピクセル単位で確実に太線を描画可能
+          depthTest={false}
+          depthWrite={false}
+          renderOrder={999}
+        />
       )}
 
       {/* 生成された断面（タイムセクター）曲面群 (再生・スライド同期平行移動付き) */}
@@ -269,6 +264,22 @@ function SpacetimeVolumeStage({
   );
 }
 
+// カメラのズーム（画角）を動的に制御する内部コンポーネント (OrbitControlsの回転位置を保持したままズームイン・アウト)
+function CameraModifier({ isPopoutOpen }: { isPopoutOpen: boolean }) {
+  const { camera } = useThree();
+
+  useEffect(() => {
+    if (isPopoutOpen) {
+      camera.fov = 25; // 視野角を狭めてズームイン (25度)
+    } else {
+      camera.fov = 45; // 通常の視野角 (45度)
+    }
+    camera.updateProjectionMatrix();
+  }, [isPopoutOpen, camera]);
+
+  return null;
+}
+
 // Canvasラッパーコンポーネント (親からPropsを受け取る)
 export default function ThreeVolume(props: ThreeVolumeProps) {
   return (
@@ -279,6 +290,9 @@ export default function ThreeVolume(props: ThreeVolumeProps) {
       >
         <ambientLight intensity={0.7} />
         <directionalLight position={[5, 10, 7]} intensity={0.8} />
+
+        {/* ズームの動的監視・変更制御 */}
+        <CameraModifier isPopoutOpen={props.isPopoutOpen} />
 
         <SpacetimeVolumeStage {...props} />
 

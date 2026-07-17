@@ -22,61 +22,63 @@ body {
 
 /* コントロールパネル: ロゴのみ */
 #info-panel {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: auto;
-  height: 90px;
+  position: relative;
+  width: 100%;
   background: transparent;
-  padding: 24px 48px;
+  padding: 24px 32px;
   z-index: 10;
   box-sizing: border-box;
   pointer-events: none;
 }
 
-/* 左側フローティングサイドバー */
-#sidebar {
+/* ヘッダー: timesectorロゴ (スリム化) */
+#info-panel h1 {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 32px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  color: #000000;
+  text-transform: lowercase;
+  line-height: 1;
+}
+
+/* ビュー内のフローティングヘッダーセクション */
+.view-header {
   position: absolute;
-  top: 150px; /* ロゴの下に配置 */
-  left: 48px;
+  top: 16px;
+  left: 24px;
+  right: 24px;
   z-index: 10;
-  pointer-events: auto;
   display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-/* ボタンのグリッド配置用 (サイドバー用に縦1列に変更) */
-.control-grid {
-  display: grid;
-  grid-template-columns: 44px; /* 縦1列に固定 */
-  gap: 4px;
+  justify-content: space-between;
   align-items: center;
+  pointer-events: none; /* Canvasのドラッグイベントを透過 */
 }
 
-.control-grid button {
+.view-title {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  text-transform: lowercase;
+  letter-spacing: 0.05em;
+  color: rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+
+.view-controls {
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+  align-items: center;
+  pointer-events: auto; /* ボタンはクリック可能にする */
+}
+
+.view-controls button {
   padding: 8px !important;
   width: 44px !important;
   height: 44px !important;
   flex: none !important;
-}
-
-/* 仕切らない縦並びレイアウト（不要になったが、他の要素への影響を考慮して残すか削除する） */
-#info-panel > div {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-/* ヘッダー: timsector, ホワイトのサンセリフフォント */
-#info-panel h3 {
-  margin: 0;
-  font-size: 80px;
-  font-weight: 800;
-  letter-spacing: -0.8px;
-  color: #000000;
-  text-transform: lowercase; /* 小文字化でさらにミニマルに */
-  line-height: 1.2;
 }
 
 /* 各セクションの説明文 */
@@ -112,7 +114,7 @@ button {
   justify-content: center;
   flex: 1;
   padding: 10px 16px;
-  border: none;
+  border: none !important;
   background-color: transparent; /* 背景色は塗らない */
   background: none;
   color: rgba(0, 0, 0, 0.4); /* 通常時は文字を少し薄くして存在感を抑える */
@@ -121,7 +123,8 @@ button {
   font-weight: 400; /* 通常時は標準ウェイト */
   font-size: 20px;
   transition: color 0.15s ease, font-weight 0.15s ease;
-  outline: none;
+  outline: none !important;
+  box-shadow: none !important;
 }
 
 button:hover {
@@ -134,7 +137,17 @@ button.active {
   background-color: transparent; /* アクティブ時も色は塗らない */
   color: #000000; /* アクティブ時は黒 */
   font-weight: 800; /* 選択中は太字(bold)で明示 */
-  border: none;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+button:focus,
+button:focus-visible,
+button:active {
+  outline: none !important;
+  border: none !important;
+  box-shadow: none !important;
 }
 
 button:disabled {
@@ -146,22 +159,39 @@ button:disabled {
 
 
 
+.viewer-workspace {
+  flex: 1;
+  position: relative;
+  width: 100vw;
+  min-height: 0;
+}
+
 /* 2画面分割レイアウト */
 #canvas-container {
   width: 50vw;
-  height: calc(100vh - 64px);
+  height: 100%;
   position: absolute;
-  top: 64px;
+  top: 0;
   left: 0;
   z-index: 1;
-  border-right: 0.5px solid rgba(0, 0, 0, 0.2); /* 0.5pxの黒線 */
+}
+
+.view-divider {
+  position: absolute;
+  top: 0;
+  left: 50vw;
+  width: 0.5px;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.2); /* 0.5px of 黒線デバイダー */
+  z-index: 5; /* WebGL Canvasの上に確実に描画 */
+  pointer-events: none;
 }
 
 #preview-container {
   width: 50vw;
-  height: calc(100vh - 64px);
+  height: 100%;
   position: absolute;
-  top: 64px;
+  top: 0;
   left: 50vw;
   z-index: 1;
   background-color: #ffffff;
@@ -329,4 +359,19 @@ button:disabled {
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+/* ポップアウト展開時の全画面Volumeレイアウト */
+.viewer-workspace.popout-active #canvas-container {
+  width: 100vw;
+}
+
+.viewer-workspace.popout-active #preview-container {
+  position: absolute;
+  left: -9999px;
+  visibility: hidden;
+}
+
+.viewer-workspace.popout-active .view-divider {
+  display: none;
 }

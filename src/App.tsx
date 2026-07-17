@@ -1,6 +1,15 @@
 import { useState, useRef, useEffect } from 'react';
 import * as THREE from 'three';
-import { Hand, Pen, Play, Pause, ArrowLeftRight, ArrowUpDown, Clock, FolderOpen } from 'lucide-react';
+import { 
+  LuRotate3D, 
+  LuArrowLeftRight, 
+  LuArrowUpDown, 
+  LuClock, 
+  LuFolderOpen, 
+  LuExternalLink 
+} from 'react-icons/lu';
+import { FaPlay, FaPause } from 'react-icons/fa6';
+import { MdDraw } from 'react-icons/md';
 import ThreeVolume from './components/ThreeVolume';
 
 // カーテンメッシュ（時間・空間スライス面）の型定義
@@ -20,11 +29,20 @@ interface TexturesState {
 }
 
 export default function App() {
+  // --- 子ウィンドウパラメータのパース ---
+  const params = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
+  const viewMode = params.get('view');
+
+  // --- ポップアウトウィンドウ監視ステート ---
+  const [isPopoutOpen, setIsPopoutOpen] = useState<boolean>(false);
+  const popoutWindowRef = useRef<Window | null>(null);
+
   // --- モード管理ステート ---
   const [toolMode, setToolMode] = useState<'rotate' | 'draw'>('rotate');
 
 
   // --- 動画関連ステート ---
+  const [samplingScale, setSamplingScale] = useState<number>(1.0); // x,y,z の共通縮小率
   const [videoSrc, setVideoSrc] = useState<string>('flower_02.mp4'); // 初期設定動画
   const [isScanning, setIsScanning] = useState<boolean>(false);
   const [scanProgressText, setScanProgressText] = useState<string>("");
@@ -99,6 +117,15 @@ export default function App() {
   const currentScanFrameRef = useRef<number>(0);
   const isScanningRef = useRef<boolean>(false);
 
+  // ページタイトルの制御
+  useEffect(() => {
+    if (viewMode === 'preview') {
+      document.title = 'timsector - Preview';
+    } else {
+      document.title = 'timsector';
+    }
+  }, [viewMode]);
+
   // 初回起動時に Canvas 要素を準備する
   useEffect(() => {
     canvasesRef.current = {
@@ -122,6 +149,75 @@ export default function App() {
     // 初期化テクスチャの作成
     initVolumeTextures(1920, 1080, 75);
   }, []);
+
+  // プレビューキャンバスのマウントを確実に検知してグローバルに登録するコールバックRef
+  const previewCanvasCallbackRef = (el: HTMLCanvasElement | null) => {
+    (previewCanvasRef as any).current = el;
+    if (el && typeof window !== 'undefined') {
+      (window as any).timesectorPreviewCanvas = el;
+    }
+  };
+
+  // 2D プレビュー子ウィンドウ用の描画同期
+  useEffect(() => {
+    if (viewMode !== 'preview' || typeof window === 'undefined' || !window.opener) return;
+
+    let active = true;
+    const canvas = previewCanvasRef.current;
+    
+    const syncLoop = () => {
+      if (!active || !canvas) return;
+      
+      const parentPreviewCanvas = (window.opener as any).timesectorPreviewCanvas;
+
+      if (parentPreviewCanvas && parentPreviewCanvas.width > 0) {
+        if (canvas.width !== parentPreviewCanvas.width || canvas.height !== parentPreviewCanvas.height) {
+          canvas.width = parentPreviewCanvas.width;
+          canvas.height = parentPreviewCanvas.height;
+        }
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(parentPreviewCanvas, 0, 0);
+        }
+      }
+
+      requestAnimationFrame(syncLoop);
+    };
+
+    requestAnimationFrame(syncLoop);
+
+    return () => {
+      active = false;
+    };
+  }, [viewMode]);
+
+  // ポップアウトウィンドウを開く関数
+  const popoutPreview = () => {
+    // 既に開いている場合はフォーカスするだけにする
+    if (popoutWindowRef.current && !popoutWindowRef.current.closed) {
+      popoutWindowRef.current.focus();
+      return;
+    }
+
+    const popout = window.open(
+      `${window.location.origin}${window.location.pathname}?view=preview`, 
+      'timesector_preview', 
+      'width=800,height=600,menubar=no,toolbar=no,location=no,status=no,resizable=yes,scrollbars=yes'
+    );
+    popoutWindowRef.current = popout;
+    setIsPopoutOpen(true);
+
+    if (popout) {
+      const checkClosed = setInterval(() => {
+        if (!popout || popout.closed) {
+          clearInterval(checkClosed);
+          setIsPopoutOpen(false);
+          popoutWindowRef.current = null;
+        }
+      }, 500);
+    }
+  };
 
   // 3D座標から動画のピクセル・フレーム座標への逆変換ヘルパー
   const getPixelCoordsLocal = (point: THREE.Vector3) => {
@@ -160,7 +256,7 @@ export default function App() {
     let texW = N;
     let texH = 128;
     if (extrudeDirection === 'Z') {
-      texH = scanFrames;
+      texH = canvases.length;
     } else if (extrudeDirection === 'X') {
       texH = canvases[0]?.width || 960;
     } else {
@@ -196,9 +292,8 @@ export default function App() {
         if (extrudeDirection === 'Z') {
           // Z軸押し出し (前面・背面クリック、縦軸 v は時間)
           frameIdx = Math.round((v / (texH - 1)) * (canvases.length - 1));
-          const cacheCanvas = canvases[frameIdx];
-          sampleX = Math.round((coords.x / videoWidth) * cacheCanvas.width);
-          sampleY = Math.round((coords.y / videoHeight) * cacheCanvas.height);
+          sampleX = Math.round(coords.x * samplingScale);
+          sampleY = Math.round(coords.y * samplingScale);
         } 
         else if (extrudeDirection === 'X') {
           // X軸押し出し (左右側面、縦軸 v は X座標)
@@ -207,7 +302,7 @@ export default function App() {
           
           const cacheCanvas = canvases[frameIdx];
           sampleX = Math.round((v / (texH - 1)) * cacheCanvas.width);
-          sampleY = Math.round((coords.y / videoHeight) * cacheCanvas.height);
+          sampleY = Math.round(coords.y * samplingScale);
         } 
         else {
           // Y軸押し出し (天底面、縦軸 v は Y座標)
@@ -215,7 +310,7 @@ export default function App() {
           frameIdx = Math.round(frameRatio * (canvases.length - 1));
           
           const cacheCanvas = canvases[frameIdx];
-          sampleX = Math.round((coords.x / videoWidth) * cacheCanvas.width);
+          sampleX = Math.round(coords.x * samplingScale);
           sampleY = Math.round((v / (texH - 1)) * cacheCanvas.height);
         }
 
@@ -250,95 +345,82 @@ export default function App() {
     }
   };
 
-  // 24fps アニメーションループタイマー (ピンポン境界制御)
+  // 24fps アニメーションループタイマー (ピンポン境界制御 - バックグラウンドでの動作を保証するため setInterval を使用)
   useEffect(() => {
     if (!isPlaying2D || isScanning) return;
 
-    let lastTime = performance.now();
-    let animationFrameId: number;
+    const interval = 1000 / 24; // 24fps
 
-    const loop = (time: number) => {
-      const delta = time - lastTime;
-      const interval = 1000 / 24; // 24fps
+    const timerId = setInterval(() => {
+      // スライドのステップ幅を定義 (ボリューム幅の 1/120 程度にする)
+      let step = 0.01;
+      let minBound = -volW / 2;
+      let maxBound = volW / 2;
 
-      if (delta >= interval) {
-        lastTime = time - (delta % interval);
-
-        // スライドのステップ幅を定義 (ボリューム幅の 1/120 程度にする)
-        let step = 0.01;
-        let minBound = -volW / 2;
-        let maxBound = volW / 2;
-
-        if (sweepAxis === 'X') {
-          step = (volW / 75) * 0.5;
-          minBound = -volW / 2;
-          maxBound = volW / 2;
-        } else if (sweepAxis === 'Y') {
-          step = (volH / 75) * 0.5;
-          minBound = -volH / 2;
-          maxBound = volH / 2;
-        } else {
-          step = (volD / 75) * 0.5;
-          minBound = -volD / 2;
-          maxBound = volD / 2;
-        }
-
-        let dir = offsetDirectionRef.current;
-        
-        setOffsetVal(prevOffset => {
-          let nextOffset = prevOffset + step * dir;
-
-          const minVal = linePointsMinMaxRef.current.min;
-          const maxVal = linePointsMinMaxRef.current.max;
-          const pathWidth = maxVal - minVal;
-          const volWidth = maxBound - minBound;
-          const margin = volWidth - pathWidth;
-
-          if (margin > 0.05) {
-            // A. 可動域（マージン）が十分にある場合：
-            // メッシュがボリュームの端に接触した瞬間に即座に切り返す（タイムラグなしでピンポン）
-            const offsetLimitMax = maxBound - maxVal;
-            const offsetLimitMin = minBound - minVal;
-
-            if (dir > 0 && nextOffset >= offsetLimitMax) {
-              dir = -1;
-              offsetDirectionRef.current = -1;
-              nextOffset = offsetLimitMax;
-            } else if (dir < 0 && nextOffset <= offsetLimitMin) {
-              dir = 1;
-              offsetDirectionRef.current = 1;
-              nextOffset = offsetLimitMin;
-            }
-          } else {
-            // B. 可動域がほぼゼロ（幅いっぱいに描かれている）の場合：
-            // 衝突によるフリーズを防ぐため、オフセット自体をボリュームのフル範囲で往復させてシーク再生する
-            // （この場合、メッシュの物理位置は ThreeVolume 内のクランプ処理で固定される）
-            if (dir > 0 && nextOffset >= maxBound) {
-              dir = -1;
-              offsetDirectionRef.current = -1;
-              nextOffset = maxBound;
-            } else if (dir < 0 && nextOffset <= minBound) {
-              dir = 1;
-              offsetDirectionRef.current = 1;
-              nextOffset = minBound;
-            }
-          }
-
-          // サンプリングCanvas of 2D & Texture の更新
-          drawPreviewCanvas(nextOffset);
-          return nextOffset;
-        });
+      if (sweepAxis === 'X') {
+        step = (volW / 75) * 0.5;
+        minBound = -volW / 2;
+        maxBound = volW / 2;
+      } else if (sweepAxis === 'Y') {
+        step = (volH / 75) * 0.5;
+        minBound = -volH / 2;
+        maxBound = volH / 2;
+      } else {
+        step = (volD / 75) * 0.5;
+        minBound = -volD / 2;
+        maxBound = volD / 2;
       }
 
-      animationFrameId = requestAnimationFrame(loop);
-    };
+      let dir = offsetDirectionRef.current;
+      
+      setOffsetVal(prevOffset => {
+        let nextOffset = prevOffset + step * dir;
 
-    animationFrameId = requestAnimationFrame(loop);
+        const minVal = linePointsMinMaxRef.current.min;
+        const maxVal = linePointsMinMaxRef.current.max;
+        const pathWidth = maxVal - minVal;
+        const volWidth = maxBound - minBound;
+        const margin = volWidth - pathWidth;
+
+        if (margin > 0.05) {
+          // A. 可動域（マージン）が十分にある場合：
+          // メッシュがボリュームの端に接触した瞬間に即座に切り返す（タイムラグなしでピンポン）
+          const offsetLimitMax = maxBound - maxVal;
+          const offsetLimitMin = minBound - minVal;
+
+          if (dir > 0 && nextOffset >= offsetLimitMax) {
+            dir = -1;
+            offsetDirectionRef.current = -1;
+            nextOffset = offsetLimitMax;
+          } else if (dir < 0 && nextOffset <= offsetLimitMin) {
+            dir = 1;
+            offsetDirectionRef.current = 1;
+            nextOffset = offsetLimitMin;
+          }
+        } else {
+          // B. 可動域がほぼゼロ（幅いっぱいに描かれている）の場合：
+          // 衝突によるフリーズを防ぐため、オフセット自体をボリュームのフル範囲で往復させてシーク再生する
+          if (dir > 0 && nextOffset >= maxBound) {
+            dir = -1;
+            offsetDirectionRef.current = -1;
+            nextOffset = maxBound;
+          } else if (dir < 0 && nextOffset <= minBound) {
+            dir = 1;
+            offsetDirectionRef.current = 1;
+            nextOffset = minBound;
+          }
+        }
+
+        // サンプリングCanvas of 2D & Texture の更新
+        drawPreviewCanvas(nextOffset);
+        return nextOffset;
+      });
+    }, interval);
 
     return () => {
-      cancelAnimationFrame(animationFrameId);
+      clearInterval(timerId);
     };
-  }, [isPlaying2D, scanFrames, isScanning, videoWidth, videoHeight, volW, volH, volD, sweepAxis]);
+  }, [isPlaying2D, scanFrames, isScanning, volW, volH, volD, sweepAxis]);
 
   // 静止中または手動更新用 (再生オフのときもスイープ軸やオフセット変更に追従)
   useEffect(() => {
@@ -463,6 +545,13 @@ export default function App() {
     if (video.duration) {
       tf = Math.round(video.duration * 30);
     }
+    
+    // x, y, z 共通の縮小率を算出 (最大次元が 960 以下になるようにスケールする)
+    const maxDim = Math.max(w, h, tf);
+    const maxTarget = 960;
+    const scale = maxDim > maxTarget ? maxTarget / maxDim : 1.0;
+    setSamplingScale(scale);
+
     const sf = Math.min(tf, 75); // 最大75フレーム
 
     setVideoWidth(w);
@@ -474,12 +563,13 @@ export default function App() {
     initVolumeTextures(w, h, sf);
     updateVolumeSize(w, h, tf);
 
-    // スキャン開始
-    startVideoScan(video, sf);
+    // スキャン開始 (共通スケールで縮小されたフレーム数を対象にする)
+    const scanTf = Math.round(tf * scale);
+    startVideoScan(video, scanTf);
   };
 
-  // スキャン開始処理
-  const startVideoScan = (video: HTMLVideoElement, sf: number) => {
+  // スキャン開始処理 (scanTf ＝ 縮小された総フレーム数)
+  const startVideoScan = (video: HTMLVideoElement, scanTf: number) => {
     setIsScanning(true);
     isScanningRef.current = true;
     currentScanFrameRef.current = 0;
@@ -494,16 +584,16 @@ export default function App() {
     scanFrameCanvasesRef.current = [];
 
     video.pause();
-    seekAndScan(video, sf);
+    seekAndScan(video, scanTf);
   };
 
   // シーク実行関数
-  const seekAndScan = (video: HTMLVideoElement, sf: number) => {
+  const seekAndScan = (video: HTMLVideoElement, scanTf: number) => {
     if (!isScanningRef.current) return;
     const currentFrame = currentScanFrameRef.current;
 
-    if (currentFrame < sf) {
-      const targetTime = (currentFrame / (sf - 1)) * video.duration;
+    if (currentFrame < scanTf) {
+      const targetTime = (currentFrame / (scanTf - 1)) * video.duration;
       video.currentTime = Math.max(0, Math.min(video.duration - 0.01, targetTime));
     } else {
       endVideoScan();
@@ -516,23 +606,24 @@ export default function App() {
     if (!video || !isScanningRef.current) return;
 
     const currentFrame = currentScanFrameRef.current;
-    const sf = scanFrames;
+    const sf = scanFrames; // 3Dボリューム側面の解像度用 (75)
+    const scanTf = Math.round(totalFrames * samplingScale); // 共通スケールでの総スキャン数
 
-    const percent = Math.round((currentFrame / sf) * 100);
-    setScanProgressText(`scanning: ${percent}% (${currentFrame}/${sf})`);
+    const percent = Math.round((currentFrame / scanTf) * 100);
+    setScanProgressText(`scanning: ${percent}% (${currentFrame}/${scanTf})`);
     setScanProgressPercent(percent);
 
-    // タイムスライス用にビデオフレームを縮小してメモリにキャッシュ (960x540)
+    // タイムスライス用にビデオフレームを共通スケールで縮小してキャッシュ (x, y の縮小率を z と同じにする)
     const cacheCanvas = document.createElement('canvas');
-    cacheCanvas.width = 960;
-    cacheCanvas.height = 540;
+    cacheCanvas.width = Math.round(videoWidth * samplingScale);
+    cacheCanvas.height = Math.round(videoHeight * samplingScale);
     const cacheCtx = cacheCanvas.getContext('2d');
     if (cacheCtx) {
       cacheCtx.drawImage(video, 0, 0, cacheCanvas.width, cacheCanvas.height);
     }
     scanFrameCanvasesRef.current.push(cacheCanvas);
 
-    // 各側面の 2D キャンバスへピクセルコピー
+    // 各側面の 2D キャンバスへピクセルコピー (3Dボリューム構築)
     const ctx = ctxRef.current;
     const w = videoWidth;
     const h = videoHeight;
@@ -544,7 +635,7 @@ export default function App() {
     }
 
     // 背面 (最終フレームを左右反転したもの)
-    if (currentFrame === sf - 1 && ctx.back) {
+    if (currentFrame === scanTf - 1 && ctx.back) {
       ctx.back.save();
       ctx.back.translate(w, 0);
       ctx.back.scale(-1, 1);
@@ -553,22 +644,25 @@ export default function App() {
       if (textures.back) textures.back.needsUpdate = true;
     }
 
-    // スリットスキャン (現在のスキャン列へ1ピクセル描き込み)
+    // ボリューム側面のインデックス位置を算出 (全フレームからボリューム用の 75列へ射影)
+    const volCol = Math.round((currentFrame / (scanTf - 1)) * (sf - 1));
+
+    // スリットスキャン (ボリューム側面の 75列の該当ピクセルへ描き込み)
     if (ctx.left) {
-      ctx.left.drawImage(video, 0, 0, 1, h, currentFrame, 0, 1, h);
+      ctx.left.drawImage(video, 0, 0, 1, h, volCol, 0, 1, h);
     }
     if (ctx.right) {
-      ctx.right.drawImage(video, w - 1, 0, 1, h, currentFrame, 0, 1, h);
+      ctx.right.drawImage(video, w - 1, 0, 1, h, volCol, 0, 1, h);
     }
     if (ctx.top) {
-      ctx.top.drawImage(video, 0, 0, w, 1, 0, currentFrame, w, 1);
+      ctx.top.drawImage(video, 0, 0, w, 1, 0, volCol, w, 1);
     }
     if (ctx.bottom) {
-      ctx.bottom.drawImage(video, 0, h - 1, w, 1, 0, currentFrame, w, 1);
+      ctx.bottom.drawImage(video, 0, h - 1, w, 1, 0, volCol, w, 1);
     }
 
     currentScanFrameRef.current++;
-    seekAndScan(video, sf);
+    seekAndScan(video, scanTf);
   };
 
   // スキャン完了
@@ -678,22 +772,14 @@ export default function App() {
   };
 
   const getSweepAxisIcon = (axis: 'X' | 'Y' | 'Z') => {
-    if (axis === 'X') return <ArrowLeftRight size={30} />;
-    if (axis === 'Y') return <ArrowUpDown size={30} />;
-    return <Clock size={30} />;
+    if (axis === 'X') return <LuArrowLeftRight size={30} />;
+    if (axis === 'Y') return <LuArrowUpDown size={30} />;
+    return <LuClock size={30} />;
   };
 
-  // 軌跡の点を最大値（600点）に等間隔リサンプリングして制限するヘルパー関数
-  const limitPoints = (points: THREE.Vector3[], maxLimit = 600): THREE.Vector3[] => {
-    const count = points.length;
-    if (count <= maxLimit) return points;
-
-    const resampled: THREE.Vector3[] = [];
-    for (let i = 0; i < maxLimit; i++) {
-      const idx = Math.round((i / (maxLimit - 1)) * (count - 1));
-      resampled.push(points[idx]);
-    }
-    return resampled;
+  // 軌跡の点を一切制限せずそのまま返す
+  const limitPoints = (points: THREE.Vector3[]): THREE.Vector3[] => {
+    return points;
   };
 
   // ★新規: ドラッグ中のリアルタイムスリットスキャン更新関数
@@ -831,114 +917,176 @@ export default function App() {
     console.log(`=============================================`);
   };
 
+  // 子ウィンドウから状態を取得したり、操作を行えるようにグローバルに露出させる
+  if (typeof window !== 'undefined') {
+    (window as any).timesectorState = {
+      isPlaying2D,
+      setIsPlaying2D,
+      sweepAxis,
+      setSweepAxis,
+      setOffsetVal,
+      lastLinePoints: lastLinePointsRef.current,
+      lastExtrudeDirection: lastExtrudeDirectionRef.current,
+      limitPoints: limitPoints,
+      calcMinMax: calcMinMax,
+      linePointsMinMaxRef: linePointsMinMaxRef,
+      offsetDirectionRef: offsetDirectionRef,
+      drawPreviewCanvas: drawPreviewCanvas
+    };
+  }
+
+  // --- 子ウィンドウ専用プレビューレンダリング ---
+  if (viewMode === 'preview') {
+    return (
+      <div style={{ width: '100vw', height: '100vh', position: 'relative', overflow: 'hidden', backgroundColor: '#ffffff', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+        <canvas id="preview-canvas" ref={previewCanvasRef} style={{ width: '90%', height: '90%', objectFit: 'contain' }} />
+      </div>
+    );
+  }
+
   return (
-    <div style={{ width: '100vw', height: '100vh', position: 'relative' }}>
-      {/* 上部横長配置のコントロールパネル (仕切り線なしのフラットヘッダー) */}
+    <div style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      {/* 上部横長配置 of 巨大ロゴ */}
       <div id="info-panel">
-        <div>
-          <h3>timesector</h3>
-        </div>
+        <h1>timesector</h1>
       </div>
 
-      {/* 左側フローティングサイドバー */}
-      <div id="sidebar">
-        <div className="control-grid">
-          <input 
-            type="file" 
-            ref={videoInputRef}
-            onChange={handleVideoFileChange}
-            accept="video/*" 
-            style={{ display: 'none' }} 
-          />
-          <button 
-            onClick={handleImportClick} 
-            disabled={isScanning}
-            data-tooltip="Open File / Import"
-          >
-            <FolderOpen size={30} />
-          </button>
-          <button 
-            className={toolMode === 'rotate' ? 'active' : ''} 
-            onClick={() => setToolMode('rotate')}
-            data-tooltip="Pan / Select"
-          >
-            <Hand size={30} />
-          </button>
-          <button 
-            className={toolMode === 'draw' ? 'active' : ''} 
-            onClick={() => setToolMode('draw')}
-            data-tooltip="Slice / Draw / Edit"
-          >
-            <Pen size={30} />
-          </button>
-          <button 
-            className={isPlaying2D ? 'active' : ''} 
-            onClick={() => setIsPlaying2D(!isPlaying2D)}
-            disabled={lastLinePointsRef.current.length === 0}
-            data-tooltip={isPlaying2D ? 'Pause' : 'Play'}
-          >
-            {isPlaying2D ? <Pause size={30} /> : <Play size={30} />}
-          </button>
-          {lastLinePointsRef.current.length >= 2 && 
-            getAvailableSweepAxes(lastExtrudeDirectionRef.current).map(opt => (
-              <button
-                key={opt.value}
-                className={sweepAxis === opt.value ? 'active' : ''}
-                data-tooltip={opt.label}
-                onClick={() => {
-                  const newAxis = opt.value as 'X' | 'Y' | 'Z';
-                  setSweepAxis(newAxis);
-                  setOffsetVal(0);
-                  offsetDirectionRef.current = 1;
+      <div className={`viewer-workspace ${isPopoutOpen ? 'popout-active' : ''}`}>
+        {/* [左半分] R3F 3D ビューアコンポーネント */}
+        <ThreeVolume
+          toolMode={toolMode}
+          volW={volW}
+          volH={volH}
+          volD={volD}
+          volumeOpacity={volumeOpacity}
+          textures={textures}
+          curtains={curtains}
+          playOffset={offsetVal}
+          scanFrames={scanFrames}
+          sweepAxis={sweepAxis}
+          onDrawStart={handleDrawStart}
+          onDrawProgress={handleDrawProgress}
+          onDrawComplete={handleDrawComplete}
+          onPointSampled={handlePointSampled}
+          isPopoutOpen={isPopoutOpen}
+        />
 
-                  // 新しいスイープ軸に合わせて軌跡全体の最小・最大限界座標を再計算する (当たり判定バグ防止)
-                  if (lastLinePointsRef.current.length > 0) {
-                    const limited = limitPoints(lastLinePointsRef.current);
-                    linePointsMinMaxRef.current = calcMinMax(limited, newAxis);
-                  }
+        {/* 左右のビューを分ける極細デバイダー線 */}
+        <div className="view-divider" />
 
-                  drawPreviewCanvas(0);
-                }}
-              >
-                {getSweepAxisIcon(opt.value as 'X' | 'Y' | 'Z')}
-              </button>
-            ))
-          }
+        {/* volumeビューのフローティングヘッダーセクション */}
+        <div className="view-header" style={isPopoutOpen ? { width: 'calc(100vw - 48px)', left: '24px' } : { width: 'calc(50vw - 48px)', left: '24px' }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+            <div className="view-title">volume</div>
+            {isScanning && (
+              <span style={{ fontSize: '11px', color: 'rgba(0, 0, 0, 0.4)', fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif', letterSpacing: '0.05em' }}>
+                ({scanProgressText})
+              </span>
+            )}
+          </div>
+          <div className="view-controls">
+            <input 
+              type="file" 
+              ref={videoInputRef}
+              onChange={handleVideoFileChange}
+              accept="video/*" 
+              style={{ display: 'none' }} 
+            />
+            <button 
+              onClick={handleImportClick} 
+              disabled={isScanning}
+              data-tooltip="Open File / Import"
+            >
+              <LuFolderOpen size={30} />
+            </button>
+            <button 
+              className={toolMode === 'rotate' ? 'active' : ''} 
+              onClick={() => setToolMode('rotate')}
+              data-tooltip="Pan / Select"
+            >
+              <LuRotate3D size={30} />
+            </button>
+            <button 
+              className={toolMode === 'draw' ? 'active' : ''} 
+              onClick={() => setToolMode('draw')}
+              data-tooltip="Slice / Draw / Edit"
+            >
+              <MdDraw size={30} />
+            </button>
+
+            {/* 以下、全てvolumeビュー側へ移動してきた2D操作系統ボタン */}
+            <button 
+              className={isPlaying2D ? 'active' : ''} 
+              onClick={() => setIsPlaying2D(!isPlaying2D)}
+              disabled={lastLinePointsRef.current.length === 0}
+              data-tooltip={isPlaying2D ? 'Pause' : 'Play'}
+            >
+              {isPlaying2D ? <FaPause size={26} /> : <FaPlay size={26} />}
+            </button>
+            {lastLinePointsRef.current.length >= 2 && 
+              getAvailableSweepAxes(lastExtrudeDirectionRef.current).map(opt => (
+                <button
+                  key={opt.value}
+                  className={sweepAxis === opt.value ? 'active' : ''}
+                  data-tooltip={opt.label}
+                  onClick={() => {
+                    const newAxis = opt.value as 'X' | 'Y' | 'Z';
+                    setSweepAxis(newAxis);
+                    setOffsetVal(0);
+                    offsetDirectionRef.current = 1;
+
+                    // 新しいスイープ軸に合わせて軌跡全体の最小・最大限界座標を再計算する (当たり判定バグ防止)
+                    if (lastLinePointsRef.current.length > 0) {
+                      const limited = limitPoints(lastLinePointsRef.current);
+                      linePointsMinMaxRef.current = calcMinMax(limited, newAxis);
+                    }
+
+                    // 即時に新しいスイープ軸基準で2Dプレビュー画像を描画更新する
+                    drawPreviewCanvas(0);
+                  }}
+                >
+                  {getSweepAxisIcon(opt.value as 'X' | 'Y' | 'Z')}
+                </button>
+              ))
+            }
+          </div>
         </div>
 
+        {/* 3Dボリューム底辺に沿う極細のシーケンス進捗バー */}
         {isScanning && (
-          <div className="scan-progress-wrapper">
-            <div className="scan-progress-text">{scanProgressText}</div>
-            <div className="scan-progress-container">
-              <div className="scan-progress-bar" style={{ width: `${scanProgressPercent}%` }}></div>
-            </div>
+          <div style={{
+            position: 'absolute',
+            bottom: 0,
+            left: 0,
+            width: '50vw',
+            height: '1.5px',
+            backgroundColor: 'rgba(0, 0, 0, 0.05)',
+            zIndex: 10
+          }}>
+            <div style={{
+              width: `${scanProgressPercent}%`,
+              height: '100%',
+              backgroundColor: '#000000',
+              transition: 'width 0.1s ease-out'
+            }} />
           </div>
         )}
-      </div>
 
-
-
-      {/* [左半分] R3F 3D ビューアコンポーネント */}
-      <ThreeVolume
-        toolMode={toolMode}
-        volW={volW}
-        volH={volH}
-        volD={volD}
-        volumeOpacity={volumeOpacity}
-        textures={textures}
-        curtains={curtains}
-        playOffset={offsetVal}
-        scanFrames={scanFrames}
-        sweepAxis={sweepAxis}
-        onDrawStart={handleDrawStart}
-        onDrawProgress={handleDrawProgress}
-        onDrawComplete={handleDrawComplete}
-        onPointSampled={handlePointSampled}
-      />
-
-      {/* [右半分] 生成された 2D スリットスキャン動画ビューア */}
-      <div id="preview-container">
-        <canvas id="preview-canvas" ref={previewCanvasRef} />
+        {/* [右半分] 生成された 2D スリットスキャン動画ビューア */}
+        <div id="preview-container">
+          <div className="view-header">
+            <div className="view-title">preview</div>
+            <div className="view-controls">
+              <button 
+                onClick={popoutPreview}
+                data-tooltip="Open in New Window"
+              >
+                <LuExternalLink size={30} />
+              </button>
+            </div>
+          </div>
+          <canvas id="preview-canvas" ref={previewCanvasCallbackRef} />
+        </div>
       </div>
 
       {/* 非表示の HTML5 Video 要素 (スキャンシーク用) */}
