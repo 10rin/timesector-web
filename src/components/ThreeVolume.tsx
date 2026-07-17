@@ -269,12 +269,14 @@ function CameraModifier({ isPopoutOpen }: { isPopoutOpen: boolean }) {
   const { camera } = useThree();
 
   useEffect(() => {
-    if (isPopoutOpen) {
-      camera.fov = 25; // 視野角を狭めてズームイン (25度)
-    } else {
-      camera.fov = 45; // 通常の視野角 (45度)
+    if (camera instanceof THREE.PerspectiveCamera) {
+      if (isPopoutOpen) {
+        camera.fov = 25; // 視野角を狭めてズームイン (25度)
+      } else {
+        camera.fov = 45; // 通常の視野角 (45度)
+      }
+      camera.updateProjectionMatrix();
     }
-    camera.updateProjectionMatrix();
   }, [isPopoutOpen, camera]);
 
   return null;
