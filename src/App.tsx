@@ -65,6 +65,7 @@ export default function App() {
   const [offsetVal, setOffsetVal] = useState<number>(0); // 物理移動オフセット
   const [isPlaying2D, setIsPlaying2D] = useState<boolean>(false); // 初期状態は「一時停止 (再生オフ)」にする
   const [sweepAxis, setSweepAxis] = useState<'X' | 'Y' | 'Z'>('X'); // アニメーションスイープ軸
+  const [playSpeed, setPlaySpeed] = useState<number>(1.0); // 再生・移動速度倍率 (デフォルト1.0x)
 
   // --- HTML5 Video 要素の参照 ---
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -125,6 +126,34 @@ export default function App() {
       document.title = 'timsector';
     }
   }, [viewMode]);
+
+  // キーボードショートカット (Spaceキーで 2D 再生 / 一時停止 のトグル)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeElement = document.activeElement;
+      if (
+        activeElement &&
+        (activeElement.tagName === 'INPUT' ||
+          activeElement.tagName === 'TEXTAREA' ||
+          activeElement.tagName === 'SELECT' ||
+          (activeElement as HTMLElement).isContentEditable)
+      ) {
+        return;
+      }
+
+      if (e.code === 'Space' || e.key === ' ') {
+        e.preventDefault();
+        if (lastLinePointsRef.current.length >= 2) {
+          setIsPlaying2D(prev => !prev);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
 
   // 初回起動時に Canvas 要素を準備する
   useEffect(() => {
@@ -358,15 +387,15 @@ export default function App() {
       let maxBound = volW / 2;
 
       if (sweepAxis === 'X') {
-        step = (volW / 75) * 0.5;
+        step = (volW / 75) * 0.5 * playSpeed;
         minBound = -volW / 2;
         maxBound = volW / 2;
       } else if (sweepAxis === 'Y') {
-        step = (volH / 75) * 0.5;
+        step = (volH / 75) * 0.5 * playSpeed;
         minBound = -volH / 2;
         maxBound = volH / 2;
       } else {
-        step = (volD / 75) * 0.5;
+        step = (volD / 75) * 0.5 * playSpeed;
         minBound = -volD / 2;
         maxBound = volD / 2;
       }
@@ -420,7 +449,7 @@ export default function App() {
     return () => {
       clearInterval(timerId);
     };
-  }, [isPlaying2D, scanFrames, isScanning, volW, volH, volD, sweepAxis]);
+  }, [isPlaying2D, scanFrames, isScanning, volW, volH, volD, sweepAxis, playSpeed]);
 
   // 静止中または手動更新用 (再生オフのときもスイープ軸やオフセット変更に追従)
   useEffect(() => {
@@ -924,6 +953,8 @@ export default function App() {
       setIsPlaying2D,
       sweepAxis,
       setSweepAxis,
+      playSpeed,
+      setPlaySpeed,
       setOffsetVal,
       lastLinePoints: lastLinePointsRef.current,
       lastExtrudeDirection: lastExtrudeDirectionRef.current,
@@ -1049,6 +1080,34 @@ export default function App() {
                 </button>
               ))
             }
+
+            {/* 再生速度調整（視覚的スライダー＆倍率切替ボタン） */}
+            {lastLinePointsRef.current.length >= 2 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '2px', marginLeft: '4px' }}>
+                <button
+                  style={{ fontSize: '13px', fontWeight: 700, width: 'auto', padding: '0 6px', height: '44px' }}
+                  onClick={() => {
+                    const speeds = [0.25, 0.5, 1, 1.5, 2, 3];
+                    const idx = speeds.indexOf(playSpeed);
+                    const next = speeds[idx >= 0 ? (idx + 1) % speeds.length : 2];
+                    setPlaySpeed(next);
+                  }}
+                  data-tooltip={`Speed: ${playSpeed}x (Click to cycle)`}
+                >
+                  {playSpeed}x
+                </button>
+                <input
+                  type="range"
+                  min="0.25"
+                  max="3.0"
+                  step="0.25"
+                  value={playSpeed}
+                  onChange={(e) => setPlaySpeed(parseFloat(e.target.value))}
+                  style={{ width: '60px', cursor: 'pointer', accentColor: '#000' }}
+                  data-tooltip={`Speed: ${playSpeed}x`}
+                />
+              </div>
+            )}
           </div>
         </div>
 
