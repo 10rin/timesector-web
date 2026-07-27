@@ -127,7 +127,7 @@ export default function App() {
     }
   }, [viewMode]);
 
-  // キーボードショートカット (Spaceキーで 2D 再生 / 一時停止 のトグル)
+  // キーボードショートカット (Space: 2D再生/一時停止, V: Pan/Select, D: Slice/Draw/Edit)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const activeElement = document.activeElement;
@@ -141,11 +141,16 @@ export default function App() {
         return;
       }
 
+      const key = e.key.toLowerCase();
       if (e.code === 'Space' || e.key === ' ') {
         e.preventDefault();
         if (lastLinePointsRef.current.length >= 2) {
           setIsPlaying2D(prev => !prev);
         }
+      } else if (key === 'v') {
+        setToolMode('rotate');
+      } else if (key === 'd') {
+        setToolMode('draw');
       }
     };
 
@@ -1033,14 +1038,14 @@ export default function App() {
             <button 
               className={toolMode === 'rotate' ? 'active' : ''} 
               onClick={() => setToolMode('rotate')}
-              data-tooltip="Pan / Select"
+              data-tooltip="Pan / Select (V)"
             >
               <LuRotate3D size={30} />
             </button>
             <button 
               className={toolMode === 'draw' ? 'active' : ''} 
               onClick={() => setToolMode('draw')}
-              data-tooltip="Slice / Draw / Edit"
+              data-tooltip="Slice / Draw / Edit (D)"
             >
               <MdDraw size={30} />
             </button>
@@ -1191,7 +1196,7 @@ export default function App() {
                 className="btn-slit-scan-go"
                 onClick={() => setIsModalOpen(false)}
               >
-                slit-scanへ
+                slit-scan
               </button>
             )}
           </div>
