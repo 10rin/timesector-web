@@ -69,6 +69,7 @@ export default function App() {
 
   // --- HTML5 Video 要素の参照 ---
   const videoRef = useRef<HTMLVideoElement>(null);
+  const modalVideoRef = useRef<HTMLVideoElement>(null); // iPad Safari blob: URL 対策用モーダル再生動画 Ref
   const videoInputRef = useRef<HTMLInputElement>(null);
 
   // --- 2D スリットスキャン結果表示 Canvas 参照 ---
@@ -679,7 +680,7 @@ export default function App() {
     const scanTf = Math.round(totalFrames * samplingScale); // 共通スケールでの総スキャン数
 
     const percent = Math.round((currentFrame / scanTf) * 100);
-    setScanProgressText(`scanning: ${percent}% (${currentFrame}/${scanTf})`);
+    setScanProgressText(`scanning: ${percent}%`);
     setScanProgressPercent(percent);
 
     // タイムスライス用にビデオフレームを共通スケールで縮小してキャッシュ (x, y の縮小率を z と同じにする)
@@ -701,6 +702,13 @@ export default function App() {
     // 前面 (最初のフレーム)
     if (currentFrame === 0 && ctx.front) {
       ctx.front.drawImage(video, 0, 0, w, h);
+      
+      // iPad Safari 等で blob: URL 動画の非表示 video が黒い場合、モーダルのアクティブ動画からフォールバック抽出
+      const modalVid = modalVideoRef.current;
+      if (modalVid && modalVid.readyState >= 2) {
+        ctx.front.drawImage(modalVid, 0, 0, w, h);
+      }
+
       if (texs.front) texs.front.needsUpdate = true;
     }
 
@@ -744,12 +752,18 @@ export default function App() {
     setIsScanning(false);
     isScanningRef.current = false;
 
-    // 【対策3】前面 (1フレーム目) の確実な抽出・再適用フォールバック
+    // 【対策3】前面 (1フレーム目) の確実な抽出・再適用フォールバック (モーダル動画からの抽出含む)
     const ctx = ctxRef.current;
     const texs = texturesRef.current;
-    if (scanFrameCanvasesRef.current.length > 0 && ctx.front && texs.front) {
-      const firstCanvas = scanFrameCanvasesRef.current[0];
-      ctx.front.drawImage(firstCanvas, 0, 0, videoWidth, videoHeight);
+    if (ctx.front && texs.front) {
+      if (scanFrameCanvasesRef.current.length > 0) {
+        const firstCanvas = scanFrameCanvasesRef.current[0];
+        ctx.front.drawImage(firstCanvas, 0, 0, videoWidth, videoHeight);
+      }
+      const modalVid = modalVideoRef.current;
+      if (modalVid && modalVid.readyState >= 2) {
+        ctx.front.drawImage(modalVid, 0, 0, videoWidth, videoHeight);
+      }
       texs.front.needsUpdate = true;
     }
 
@@ -777,10 +791,18 @@ export default function App() {
       // 以前の断面をすべて破棄
       clearAllCurtains();
 
+      // 以前の Blob URL メモリをブラウザから解約・解放する (メモリリーク防止)
+      if (videoSrc && videoSrc.startsWith('blob:')) {
+        URL.revokeObjectURL(videoSrc);
+      }
+
       const fileURL = URL.createObjectURL(file);
       setVideoSrc(fileURL);
       setIsModalOpen(true);
       setScanCompleted(false);
+
+      // input の選択値をクリア (同ファイル・連続選択の再発火を保証)
+      e.target.value = '';
     }
   };
 
@@ -1065,7 +1087,7 @@ export default function App() {
             <div className="view-title">volume</div>
             {isScanning && (
               <span style={{ fontSize: '11px', color: 'rgba(0, 0, 0, 0.4)', fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif', letterSpacing: '0.05em' }}>
-                ({scanProgressText})
+                {scanProgressText}
               </span>
             )}
           </div>
@@ -1232,12 +1254,22 @@ export default function App() {
             
             <div className="modal-video-wrapper">
               <video
+                ref={modalVideoRef}
                 src={videoSrc}
                 autoPlay
                 loop
                 muted
                 playsInline
                 className="modal-preview-video"
+                onLoadedData={() => {
+                  const ctx = ctxRef.current;
+                  const texs = texturesRef.current;
+                  const modalVid = modalVideoRef.current;
+                  if (ctx?.front && texs?.front && modalVid && modalVid.readyState >= 2) {
+                    ctx.front.drawImage(modalVid, 0, 0, videoWidth, videoHeight);
+                    texs.front.needsUpdate = true;
+                  }
+                }}
               />
             </div>
 
