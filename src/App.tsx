@@ -97,8 +97,11 @@ export default function App() {
     bottom: CanvasRenderingContext2D | null;
   }>({ front: null, back: null, left: null, right: null, top: null, bottom: null });
 
-  // --- Three.js CanvasTexture のステート ---
+  // --- Three.js CanvasTexture のステート & Ref (Safari非同期更新対策) ---
   const [textures, setTextures] = useState<TexturesState>({
+    front: null, back: null, left: null, right: null, top: null, bottom: null
+  });
+  const texturesRef = useRef<TexturesState>({
     front: null, back: null, left: null, right: null, top: null, bottom: null
   });
 
@@ -558,14 +561,17 @@ export default function App() {
     texBottom.repeat.y = -1;
     texBottom.offset.y = 1;
 
-    setTextures({
+    const newTextures = {
       front: texFront,
       back: texBack,
       left: texLeft,
       right: texRight,
       top: texTop,
       bottom: texBottom
-    });
+    };
+
+    texturesRef.current = newTextures;
+    setTextures(newTextures);
   };
 
   // ビデオメタデータ読み込み時のハンドリング
@@ -597,13 +603,22 @@ export default function App() {
     initVolumeTextures(w, h, sf);
     updateVolumeSize(w, h, tf);
 
-    // スキャン開始 (共通スケールで縮小されたフレーム数を対象にする)
     const scanTf = Math.round(tf * scale);
-    startVideoScan(video, scanTf);
+
+    // 【対策1】Safari readyState >= 2 (HAVE_CURRENT_DATA) 待機
+    if (video.readyState < 2) {
+      const onCanPlay = () => {
+        video.removeEventListener('canplay', onCanPlay);
+        startVideoScan(video, scanTf);
+      };
+      video.addEventListener('canplay', onCanPlay);
+    } else {
+      startVideoScan(video, scanTf);
+    }
   };
 
   // スキャン開始処理 (scanTf ＝ 縮小された総フレーム数)
-  const startVideoScan = (video: HTMLVideoElement, scanTf: number) => {
+  const startVideoScan = async (video: HTMLVideoElement, scanTf: number) => {
     setIsScanning(true);
     isScanningRef.current = true;
     currentScanFrameRef.current = 0;
@@ -617,7 +632,14 @@ export default function App() {
     });
     scanFrameCanvasesRef.current = [];
 
+    // 【対策3】Safari 用のビデオデコーダー活性化 (一瞬 play() してから pause())
+    try {
+      await video.play();
+    } catch (_e) {
+      // 自動再生制限のフォールバック
+    }
     video.pause();
+
     seekAndScan(video, scanTf);
   };
 
@@ -628,7 +650,14 @@ export default function App() {
 
     if (currentFrame < scanTf) {
       const targetTime = (currentFrame / (scanTf - 1)) * video.duration;
-      video.currentTime = Math.max(0, Math.min(video.duration - 0.01, targetTime));
+      const nextTime = Math.max(0, Math.min(video.duration - 0.01, targetTime));
+
+      // 【対策2】currentTime = 0 で seeked が発火しない仕様を考慮し、手動で handleSeeked を呼ぶ
+      if (Math.abs(video.currentTime - nextTime) < 0.0001) {
+        handleSeeked();
+      } else {
+        video.currentTime = nextTime;
+      }
     } else {
       endVideoScan();
     }
@@ -638,6 +667,12 @@ export default function App() {
   const handleSeeked = () => {
     const video = videoRef.current;
     if (!video || !isScanningRef.current) return;
+
+    // 【対策1】ピクセルデータがロード完了するまで待機 (readyState >= 2)
+    if (video.readyState < 2) {
+      setTimeout(() => handleSeeked(), 30);
+      return;
+    }
 
     const currentFrame = currentScanFrameRef.current;
     const sf = scanFrames; // 3Dボリューム側面の解像度用 (75)
@@ -659,13 +694,14 @@ export default function App() {
 
     // 各側面の 2D キャンバスへピクセルコピー (3Dボリューム構築)
     const ctx = ctxRef.current;
+    const texs = texturesRef.current;
     const w = videoWidth;
     const h = videoHeight;
 
     // 前面 (最初のフレーム)
     if (currentFrame === 0 && ctx.front) {
       ctx.front.drawImage(video, 0, 0, w, h);
-      if (textures.front) textures.front.needsUpdate = true;
+      if (texs.front) texs.front.needsUpdate = true;
     }
 
     // 背面 (最終フレームを左右反転したもの)
@@ -675,7 +711,7 @@ export default function App() {
       ctx.back.scale(-1, 1);
       ctx.back.drawImage(video, 0, 0, w, h);
       ctx.back.restore();
-      if (textures.back) textures.back.needsUpdate = true;
+      if (texs.back) texs.back.needsUpdate = true;
     }
 
     // ボリューム側面のインデックス位置を算出 (全フレームからボリューム用の 75列へ射影)
@@ -684,15 +720,19 @@ export default function App() {
     // スリットスキャン (ボリューム側面の 75列の該当ピクセルへ描き込み)
     if (ctx.left) {
       ctx.left.drawImage(video, 0, 0, 1, h, volCol, 0, 1, h);
+      if (texs.left) texs.left.needsUpdate = true;
     }
     if (ctx.right) {
       ctx.right.drawImage(video, w - 1, 0, 1, h, volCol, 0, 1, h);
+      if (texs.right) texs.right.needsUpdate = true;
     }
     if (ctx.top) {
       ctx.top.drawImage(video, 0, 0, w, 1, 0, volCol, w, 1);
+      if (texs.top) texs.top.needsUpdate = true;
     }
     if (ctx.bottom) {
       ctx.bottom.drawImage(video, 0, h - 1, w, 1, 0, volCol, w, 1);
+      if (texs.bottom) texs.bottom.needsUpdate = true;
     }
 
     currentScanFrameRef.current++;
@@ -704,8 +744,17 @@ export default function App() {
     setIsScanning(false);
     isScanningRef.current = false;
 
+    // 【対策3】前面 (1フレーム目) の確実な抽出・再適用フォールバック
+    const ctx = ctxRef.current;
+    const texs = texturesRef.current;
+    if (scanFrameCanvasesRef.current.length > 0 && ctx.front && texs.front) {
+      const firstCanvas = scanFrameCanvasesRef.current[0];
+      ctx.front.drawImage(firstCanvas, 0, 0, videoWidth, videoHeight);
+      texs.front.needsUpdate = true;
+    }
+
     // テクスチャのアップロード更新
-    Object.values(textures).forEach(tex => {
+    Object.values(texturesRef.current).forEach(tex => {
       if (tex) tex.needsUpdate = true;
     });
 
@@ -1153,7 +1202,7 @@ export default function App() {
         </div>
       </div>
 
-      {/* 非表示の HTML5 Video 要素 (スキャンシーク用) */}
+      {/* 【対策3】HTML5 Video 要素 (display:none による描画バッファ破棄を防ぐため画面外配置にする) */}
       <video
         ref={videoRef}
         crossOrigin="anonymous"
@@ -1162,7 +1211,15 @@ export default function App() {
         muted={true}
         autoPlay={false}
         playsInline={true}
-        style={{ display: 'none' }}
+        style={{
+          position: 'fixed',
+          left: '-9999px',
+          top: '-9999px',
+          width: '1px',
+          height: '1px',
+          opacity: 0,
+          pointerEvents: 'none'
+        }}
         onLoadedMetadata={handleLoadedMetadata}
         onSeeked={handleSeeked}
       />
