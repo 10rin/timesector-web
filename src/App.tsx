@@ -122,23 +122,6 @@ export default function App() {
   const currentScanFrameRef = useRef<number>(0);
   const isScanningRef = useRef<boolean>(false);
 
-  // 2Dプレビュー画像のサイレント自動ダウンロード保存関数 (アニメーションなし)
-  const downloadImageSilently = () => {
-    const canvas = previewCanvasRef.current;
-    if (!canvas || canvas.width === 0 || canvas.height === 0) return;
-    try {
-      const dataUrl = canvas.toDataURL('image/png');
-      const a = document.createElement('a');
-      a.href = dataUrl;
-      a.download = `timesector_image_${Date.now()}.png`;
-      a.style.display = 'none';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-    } catch (e) {
-      console.error('Auto image download failed:', e);
-    }
-  };
 
   // ページタイトルの制御
   useEffect(() => {
@@ -1037,10 +1020,7 @@ export default function App() {
     console.log("=== DRAWING PATH COORDINATES (X, Y, Frame) ===");
     console.table(sampledCoords);
 
-    // ★ドローイング完了直後に生成された 2D 静止画像をバックグラウンドで自動保存 (アニメーションなし)
-    setTimeout(() => {
-      downloadImageSilently();
-    }, 100);
+
   };
 
   // 子ウィンドウから状態を取得したり、操作を行えるようにグローバルに露出させる
