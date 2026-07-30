@@ -285,7 +285,7 @@ function CameraModifier({ isPopoutOpen }: { isPopoutOpen: boolean }) {
 // Canvasラッパーコンポーネント (親からPropsを受け取る)
 export default function ThreeVolume(props: ThreeVolumeProps) {
   return (
-    <div id="canvas-container">
+    <div id="canvas-container" className={`mode-${props.toolMode}`}>
       <Canvas
         camera={{ position: [3, 3, 5], fov: 45 }}
         gl={{ antialias: true }}

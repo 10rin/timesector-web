@@ -176,6 +176,18 @@ button:disabled {
   z-index: 1;
 }
 
+#canvas-container.mode-rotate {
+  cursor: grab;
+}
+
+#canvas-container.mode-rotate:active {
+  cursor: grabbing;
+}
+
+#canvas-container.mode-draw {
+  cursor: crosshair;
+}
+
 .view-divider {
   position: absolute;
   top: 0;
@@ -202,8 +214,8 @@ button:disabled {
 }
 
 #preview-canvas {
-  width: 90%;
-  height: 75%;
+  width: 100%;
+  height: 85%;
   object-fit: contain;
   border-radius: 0; /* 丸みはなし */
   image-rendering: auto;
