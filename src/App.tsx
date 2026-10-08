@@ -43,7 +43,7 @@ export default function App() {
 
   // --- 動画関連ステート ---
   const [samplingScale, setSamplingScale] = useState<number>(1.0); // x,y,z の共通縮小率
-  const [videoSrc, setVideoSrc] = useState<string>('flower_02.mp4'); // 初期設定動画
+  const [videoSrc, setVideoSrc] = useState<string>('sample.mp4'); // 初期設定動画
   const [isScanning, setIsScanning] = useState<boolean>(false);
   const [scanProgressText, setScanProgressText] = useState<string>("");
   const [scanProgressPercent, setScanProgressPercent] = useState<number>(0);
