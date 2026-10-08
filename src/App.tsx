@@ -5,6 +5,7 @@ import {
   LuArrowLeftRight, 
   LuArrowUpDown, 
   LuClock, 
+  LuOrbit, 
   LuFolderOpen, 
   LuExternalLink 
 } from 'react-icons/lu';
@@ -27,6 +28,12 @@ interface TexturesState {
   top: THREE.CanvasTexture | null;
   bottom: THREE.CanvasTexture | null;
 }
+
+// 断面の移動モード (X/Y/Z: 軸に沿った往復, CIRCLE: 押し出し方向に垂直な平面内での円運動)
+type SweepMode = 'X' | 'Y' | 'Z' | 'CIRCLE';
+
+// 円運動で1周するのに必要なティック数 (24fps で約12.5秒 = 直線往復1回とほぼ同じ周期)
+const CIRCLE_TICKS_PER_LOOP = 300;
 
 export default function App() {
   // --- 子ウィンドウパラメータのパース ---
@@ -62,9 +69,9 @@ export default function App() {
   const [volumeOpacity, setVolumeOpacity] = useState<number>(1.0);
 
   // --- 2D スリットスキャン動画 (24fps) アニメーションステート ---
-  const [offsetVal, setOffsetVal] = useState<number>(0); // 物理移動オフセット
+  const [offsetVal, setOffsetVal] = useState<number>(0); // 物理移動オフセット (CIRCLE モードでは角度 [rad])
   const [isPlaying2D, setIsPlaying2D] = useState<boolean>(false); // 初期状態は「一時停止 (再生オフ)」にする
-  const [sweepAxis, setSweepAxis] = useState<'X' | 'Y' | 'Z'>('X'); // アニメーションスイープ軸
+  const [sweepAxis, setSweepAxis] = useState<SweepMode>('X'); // アニメーションスイープ軸
   const [playSpeed, setPlaySpeed] = useState<number>(1.0); // 再生・移動速度倍率 (デフォルト1.0x)
 
   // --- HTML5 Video 要素の参照 ---
@@ -270,6 +277,67 @@ export default function App() {
     };
   };
 
+  // ドローイング位置 (オフセット0) から指定軸に沿って動かせる範囲 [lo, hi] を算出する (lo <= 0 <= hi)
+  // 可動域がほぼゼロの場合は、直線モードと同様にボリュームのフル範囲を使う
+  const getMovableRange = (axis: 'X' | 'Y' | 'Z') => {
+    const half = axis === 'X' ? volW / 2 : axis === 'Y' ? volH / 2 : volD / 2;
+    const { min, max } = calcMinMax(lastLinePointsRef.current, axis);
+    const lo = Math.min(0, -half - min);
+    const hi = Math.max(0, half - max);
+    if (hi - lo <= 0.05) {
+      return { lo: -half, hi: half };
+    }
+    return { lo, hi };
+  };
+
+  // ドローイング位置を通る楕円軌道のパラメータを算出する
+  // 一方の軸 (extend) は余白の広い側へ伸ばして余白いっぱいを直径とし、
+  // もう一方の軸 (side) はドローイング位置を中心に両側の余白の狭い方を半径とする。
+  // 2軸の役割を入れ替えた2通りのうち、面積が大きい方を採用する
+  const getCircleOrbit = () => {
+    const [axisA, axisB] = getAvailableSweepAxes(lastExtrudeDirectionRef.current)
+      .map(opt => opt.value as 'X' | 'Y' | 'Z');
+    const rangeA = getMovableRange(axisA);
+    const rangeB = getMovableRange(axisB);
+
+    const makeOrbit = (
+      extendAxis: 'X' | 'Y' | 'Z', extendRange: { lo: number, hi: number },
+      sideAxis: 'X' | 'Y' | 'Z', sideRange: { lo: number, hi: number }
+    ) => {
+      const extendSign = extendRange.hi >= -extendRange.lo ? 1 : -1;
+      const extendRadius = Math.max(extendRange.hi, -extendRange.lo) / 2;
+      const sideRadius = Math.min(sideRange.hi, -sideRange.lo);
+      return { extendAxis, extendSign, extendRadius, sideAxis, sideRadius };
+    };
+
+    const orbitA = makeOrbit(axisA, rangeA, axisB, rangeB);
+    const orbitB = makeOrbit(axisB, rangeB, axisA, rangeA);
+    return orbitA.extendRadius * orbitA.sideRadius >= orbitB.extendRadius * orbitB.sideRadius
+      ? orbitA
+      : orbitB;
+  };
+
+  // オフセット値と移動モードから、軌跡に加算する3D移動ベクトルを算出する
+  const getSweepOffset = (value: number, mode: SweepMode) => {
+    const offset = new THREE.Vector3(0, 0, 0);
+    if (mode === 'X') offset.x = value;
+    else if (mode === 'Y') offset.y = value;
+    else if (mode === 'Z') offset.z = value;
+    else {
+      // CIRCLE: ドローイング位置 (角度0) を出発点とし、1周で元の位置に戻る楕円軌道を描く (value は角度)
+      const orbit = getCircleOrbit();
+      offset.setComponent(
+        ['X', 'Y', 'Z'].indexOf(orbit.extendAxis),
+        orbit.extendSign * orbit.extendRadius * (1 - Math.cos(value))
+      );
+      offset.setComponent(
+        ['X', 'Y', 'Z'].indexOf(orbit.sideAxis),
+        orbit.sideRadius * Math.sin(value)
+      );
+    }
+    return offset;
+  };
+
   // 2D プレビューキャンバスへのリアルタイムスリットスキャンサンプリング描画関数
   const drawPreviewCanvas = (currentOffsetVal: number) => {
     const canvas = previewCanvasRef.current;
@@ -310,13 +378,10 @@ export default function App() {
     const imgData = ctx.createImageData(texW, texH);
     const data = imgData.data;
 
-    // 座標に現在の offset 値を直接加算してスライド軌跡を算出する
+    // 座標に現在の移動ベクトルを加算してスライド軌跡を算出する
+    const sweepOffset = getSweepOffset(currentOffsetVal, sweepAxis);
     const pathCoords = lastLinePointsRef.current.map(pt => {
-      const opt = pt.clone();
-      if (sweepAxis === 'X') opt.x += currentOffsetVal;
-      else if (sweepAxis === 'Y') opt.y += currentOffsetVal;
-      else if (sweepAxis === 'Z') opt.z += currentOffsetVal;
-      return getPixelCoordsLocal(opt);
+      return getPixelCoordsLocal(pt.clone().add(sweepOffset));
     });
 
 
@@ -391,6 +456,17 @@ export default function App() {
     const interval = 1000 / 24; // 24fps
 
     const timerId = setInterval(() => {
+      // CIRCLE モード: 角度を進めて円軌道上を周回させる (端での切り返しは不要)
+      if (sweepAxis === 'CIRCLE') {
+        const angleStep = (2 * Math.PI / CIRCLE_TICKS_PER_LOOP) * playSpeed;
+        setOffsetVal(prevAngle => {
+          const nextAngle = (prevAngle + angleStep) % (2 * Math.PI);
+          drawPreviewCanvas(nextAngle);
+          return nextAngle;
+        });
+        return;
+      }
+
       // スライドのステップ幅を定義 (ボリューム幅の 1/120 程度にする)
       let step = 0.01;
       let minBound = -volW / 2;
@@ -903,8 +979,10 @@ export default function App() {
     }
     lastExtrudeDirectionRef.current = extrudeDirection;
 
-    // 限界値（境界）の計算
-    linePointsMinMaxRef.current = calcMinMax(limited, currentAxis);
+    // 限界値（境界）の計算 (CIRCLE モードは描画時に getMovableRange で算出する)
+    if (currentAxis !== 'CIRCLE') {
+      linePointsMinMaxRef.current = calcMinMax(limited, currentAxis);
+    }
 
     // キャッシュ画像から ImageData を事前取得していない場合は初期化
     const canvases = scanFrameCanvasesRef.current;
@@ -939,8 +1017,10 @@ export default function App() {
     }
     lastExtrudeDirectionRef.current = extrudeDirection;
 
-    // 限界値（境界）の計算
-    linePointsMinMaxRef.current = calcMinMax(limited, currentAxis);
+    // 限界値（境界）の計算 (CIRCLE モードは描画時に getMovableRange で算出する)
+    if (currentAxis !== 'CIRCLE') {
+      linePointsMinMaxRef.current = calcMinMax(limited, currentAxis);
+    }
 
     // ★重要: CanvasTexture を新規生成（アロケーション）する前に、
     // まず drawPreviewCanvas(0) を呼んで、previewCanvas のサイズ（アスペクト比）と描画を
@@ -1069,9 +1149,8 @@ export default function App() {
           volumeOpacity={volumeOpacity}
           textures={textures}
           curtains={curtains}
-          playOffset={offsetVal}
+          playOffset={getSweepOffset(offsetVal, sweepAxis)}
           scanFrames={scanFrames}
-          sweepAxis={sweepAxis}
           onDrawStart={handleDrawStart}
           onDrawProgress={handleDrawProgress}
           onDrawComplete={handleDrawComplete}
@@ -1103,21 +1182,21 @@ export default function App() {
             <button 
               onClick={handleImportClick} 
               disabled={isScanning}
-              data-tooltip="Open File / Import"
+              data-tooltip="動画"
             >
               <LuFolderOpen size={30} />
             </button>
             <button 
               className={toolMode === 'rotate' ? 'active' : ''} 
               onClick={() => setToolMode('rotate')}
-              data-tooltip="Pan / Select (V)"
+              data-tooltip="視点操作"
             >
               <LuRotate3D size={30} />
             </button>
             <button 
               className={toolMode === 'draw' ? 'active' : ''} 
               onClick={() => setToolMode('draw')}
-              data-tooltip="Slice / Draw / Edit (D)"
+              data-tooltip="ドロー"
             >
               <MdDraw size={30} />
             </button>
@@ -1127,10 +1206,18 @@ export default function App() {
               className={isPlaying2D ? 'active' : ''} 
               onClick={() => setIsPlaying2D(!isPlaying2D)}
               disabled={lastLinePointsRef.current.length === 0}
-              data-tooltip={isPlaying2D ? 'Pause' : 'Play'}
+              data-tooltip={isPlaying2D ? '停止' : '再生'}
             >
               {isPlaying2D ? <FaPause size={26} /> : <FaPlay size={26} />}
             </button>
+
+            {/* 区切り線とグループ名: ここから右は断面の移動モード (軸方向・円軌道・速度) */}
+            {lastLinePointsRef.current.length >= 2 && (
+              <>
+                <div className="control-separator" />
+                <span className="control-group-label">motion</span>
+              </>
+            )}
             {lastLinePointsRef.current.length >= 2 && 
               getAvailableSweepAxes(lastExtrudeDirectionRef.current).map(opt => (
                 <button
@@ -1157,6 +1244,19 @@ export default function App() {
                 </button>
               ))
             }
+            {lastLinePointsRef.current.length >= 2 && (
+              <button
+                className={sweepAxis === 'CIRCLE' ? 'active' : ''}
+                data-tooltip="円軌道 (楕円を描いて周回)"
+                onClick={() => {
+                  // 角度 0 から周回を開始する (プレビューは sweepAxis 変更を監視する useEffect で再描画される)
+                  setSweepAxis('CIRCLE');
+                  setOffsetVal(0);
+                }}
+              >
+                <LuOrbit size={30} />
+              </button>
+            )}
 
             {/* 再生速度調整（視覚的スライダー＆倍率切替ボタン） */}
             {lastLinePointsRef.current.length >= 2 && (
@@ -1215,7 +1315,7 @@ export default function App() {
             <div className="view-controls">
               <button 
                 onClick={popoutPreview}
-                data-tooltip="Open in New Window"
+                data-tooltip="プレビューを拡大表示"
               >
                 <LuExternalLink size={30} />
               </button>

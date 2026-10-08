@@ -22,9 +22,8 @@ interface ThreeVolumeProps {
     geometry: THREE.BufferGeometry;
     material: THREE.Material;
   }>;
-  playOffset: number;       // ★同期用Props
+  playOffset: THREE.Vector3; // ★同期用Props (移動モードに応じた3D移動ベクトル)
   scanFrames: number;       // ★同期用Props
-  sweepAxis: 'X' | 'Y' | 'Z'; // ★同期用Props
   onDrawComplete: (points: THREE.Vector3[], direction: 'X' | 'Y' | 'Z') => void;
   onDrawProgress: (points: THREE.Vector3[], direction: 'X' | 'Y' | 'Z') => void; // ドラッグ中リアルタイム同期
   onDrawStart: () => void;
@@ -43,7 +42,6 @@ function SpacetimeVolumeStage({
   curtains,
   playOffset,
   scanFrames,
-  sweepAxis,
   onDrawComplete,
   onDrawProgress,
   onDrawStart,
@@ -192,31 +190,10 @@ function SpacetimeVolumeStage({
     const bbox = curtain.geometry.boundingBox;
     if (!bbox) return pos;
 
-    const offset = playOffset;
-    let clampedOffset = offset;
-    
-    if (sweepAxis === 'X') {
-      const minBound = -volW / 2;
-      const maxBound = volW / 2;
-      const minVal = bbox.min.x;
-      const maxVal = bbox.max.x;
-      clampedOffset = Math.max(minBound - minVal, Math.min(maxBound - maxVal, offset));
-      pos.x = clampedOffset;
-    } else if (sweepAxis === 'Y') {
-      const minBound = -volH / 2;
-      const maxBound = volH / 2;
-      const minVal = bbox.min.y;
-      const maxVal = bbox.max.y;
-      clampedOffset = Math.max(minBound - minVal, Math.min(maxBound - maxVal, offset));
-      pos.y = clampedOffset;
-    } else if (sweepAxis === 'Z') {
-      const minBound = -volD / 2;
-      const maxBound = volD / 2;
-      const minVal = bbox.min.z;
-      const maxVal = bbox.max.z;
-      clampedOffset = Math.max(minBound - minVal, Math.min(maxBound - maxVal, offset));
-      pos.z = clampedOffset;
-    }
+    // 各軸ごとに、メッシュがボリュームからはみ出ない範囲にクランプする (直線・円軌道共通)
+    pos.x = Math.max(-volW / 2 - bbox.min.x, Math.min(volW / 2 - bbox.max.x, playOffset.x));
+    pos.y = Math.max(-volH / 2 - bbox.min.y, Math.min(volH / 2 - bbox.max.y, playOffset.y));
+    pos.z = Math.max(-volD / 2 - bbox.min.z, Math.min(volD / 2 - bbox.max.z, playOffset.z));
     return pos;
   };
 
